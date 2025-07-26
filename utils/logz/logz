@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# logz - Advanced logging utility
+set -euo pipefail
+
+# Default configuration
+LOG_LEVEL="INFO"
+LOG_FORMAT="text"
+LOG_FILE=""
+LOG_TIMESTAMP=1
+LOG_COLOR=1  # Enable by default
+FILTER_LEVEL=""  # Separate filtering level
+DEBUG=0
+
+# Initialize log level from environment variables
+init_log_level() {
+    # Only set FILTER_LEVEL if environment variables are present
+    # If no env vars are set, FILTER_LEVEL stays empty (meaning no filtering)
+    if [ -n "${LOGZ_LEVEL:-}" ]; then
+        FILTER_LEVEL="$LOGZ_LEVEL"
+    elif [ -n "${LOG_LEVEL_FILTER:-}" ]; then
+        FILTER_LEVEL="$LOG_LEVEL_FILTER"
+    fi
+    # If neither env var is set, FILTER_LEVEL remains empty = no filtering
+}
+
+# Show help using hush
+show_help() {
+    command -v hush >/dev/null 2>&1 && exec hush "$(basename "$0")" || echo "Install hush for help output." >&2
+}
+
+# Error handling
+error_exit() {
+    echo "Error: $1" >&2
+    exit "$2"
+}
+
+# Initialize log level from environment variables
+init_log_level
+
+# Parse arguments
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -l|--level)
+            LOG_LEVEL="$2"
+            shift 2
+            ;;
+        -f|--format)
+            LOG_FORMAT="$2"
+            shift 2
+            ;;
+        -o|--output)
+            LOG_FILE="$2"
+            shift 2
+            ;;
+        -t|--timestamp)
+            LOG_TIMESTAMP=1
+            shift
+            ;;
+        -T|--no-timestamp)
+            LOG_TIMESTAMP=0
+            shift
+            ;;
+        -c|--color)
+            LOG_COLOR=1
+            shift
+            ;;
+        -C|--no-color)
+            LOG_COLOR=0
+            shift
+            ;;
+        -d|--debug)
+            DEBUG=1
+            shift
+            ;;
+        -h|--help)
+            show_help
+            ;;
+        -*)
+            error_exit "Unknown option: $1" 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Validate log level
+case "$LOG_LEVEL" in
+    DEBUG|INFO|WARN|ERROR|FATAL) ;;
+    *) error_exit "Invalid log level: $LOG_LEVEL" 2 ;;
+esac
+
+# Validate format
+case "$LOG_FORMAT" in
+    text|json|syslog) ;;
+    *) error_exit "Invalid format: $LOG_FORMAT" 1 ;;
+esac
+
+# Get message
+[ $# -eq 0 ] && error_exit "No message provided" 1
+MESSAGE="$*"
+
+# Get timestamp
+get_timestamp() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
+
+# Color codes
+get_color() {
+    case "$1" in
+        DEBUG) echo "36" ;;
+        INFO) echo "32" ;;
+        WARN) echo "33" ;;
+        ERROR) echo "31" ;;
+        FATAL) echo "35" ;;
+        *) echo "0" ;;
+    esac
+}
+
+# Format log message
+format_message() {
+    local level="$1"
+    local msg="$2"
+    local ts=""
+    
+    [ $LOG_TIMESTAMP -eq 1 ] && ts="$(get_timestamp) "
+    
+    case "$LOG_FORMAT" in
+        text)
+            if [ $LOG_COLOR -eq 1 ]; then
+                local color
+                color=$(get_color "$level")
+                echo -e "\033[${color}m${ts}${level} [$] ${msg}\033[0m"
+            else
+                echo "${ts}${level} [$] ${msg}"
+            fi
+            ;;
+        json)
+            echo "{\"timestamp\":\"$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')\",\"level\":\"$level\",\"pid\":$$,\"message\":\"$msg\"}"
+            ;;
+        syslog)
+            local syslog_level
+            case "$level" in 
+                DEBUG) syslog_level=7;; 
+                INFO) syslog_level=6;; 
+                WARN) syslog_level=4;; 
+                ERROR) syslog_level=3;; 
+                FATAL) syslog_level=2;; 
+            esac
+            echo "<$syslog_level>$(date '+%b %d %H:%M:%S') $(hostname 2>/dev/null || echo 'localhost')[$$]: $msg"
+            ;;
+    esac
+}
+
+# Check if we should log this level
+should_log() {
+    local msg_level="$1"
+    
+    if [ $DEBUG -eq 1 ]; then
+        echo "DEBUG: msg_level=$msg_level, filter_level=$FILTER_LEVEL" >&2
+    fi
+    
+    # If no filter is set, show all messages (default behavior)
+    if [ -z "$FILTER_LEVEL" ]; then
+        return 0
+    fi
+    
+    # Exact match - only show messages that match the filter level exactly
+    [ "$msg_level" = "$FILTER_LEVEL" ]
+}
+
+# Log function
+log() {
+    local level="$1"
+    local message="$2"
+    
+    if should_log "$level"; then
+        local formatted
+        formatted=$(format_message "$level" "$message")
+        if [ -n "$LOG_FILE" ]; then
+            echo "$formatted" >> "$LOG_FILE" 2>/dev/null || error_exit "Cannot write to log file: $LOG_FILE" 3
+        else
+            echo "$formatted"
+        fi
+    fi
+}
+
+# Log the message
+log "$LOG_LEVEL" "$MESSAGE"
+exit 0

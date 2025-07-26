@@ -1,0 +1,38 @@
+USAGE:
+logz [OPTIONS] MESSAGE
+
+DESCRIPTION:
+Advanced logging utility with levels, formats, file output, and color.
+
+ARGUMENTS:
+* message: TEXT [required]
+    The log message to output
+
+OPTIONS:
+-l, --level TEXT: Set log level (default: INFO)
+    Choices: DEBUG, INFO, WARN, ERROR, FATAL
+-f, --format TEXT: Set output format (default: text)
+    Choices: text, json, syslog
+-o, --output FILE: Write logs to file instead of stdout
+-t, --timestamp: Include timestamp (default)
+-T, --no-timestamp: Disable timestamp
+-c, --color: Enable color output
+-h, --help: Show this message and exit
+
+EXAMPLES:
+logz "Application started": Basic INFO logging
+logz -l ERROR -o app.log "DB failed": Error to file
+logz -f json -c "User login": JSON with color
+logz -l DEBUG -T "Debug info": Debug without timestamp
+logz -f syslog "System event": Syslog format
+
+EXIT_CODES:
+0: Success
+1: Usage error
+2: Invalid log level
+3: File write error
+
+NOTES:
+- Defaults: INFO level, text format
+- JSON includes timestamp, level, PID, message
+- Syslog format includes facility codes

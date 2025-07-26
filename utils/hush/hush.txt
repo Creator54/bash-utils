@@ -1,0 +1,36 @@
+USAGE:
+  hush [OPTIONS] UTILITY [ARGS]...
+
+DESCRIPTION:
+  Minimal, elegant help for shell utilities.
+  Supports dynamic flags, argument injection, and themed output.
+
+ARGUMENTS:
+* UTILITY: TEXT [required]
+    Name of the utility to show help for
+  ARGS: TEXT...
+    Optional arguments or subcommands to pass through
+
+OPTIONS:
+  --no-color: Disable color output
+  --file: Use a custom help file
+  --inject-flag: Inject a dynamic flag (--name:description)
+  --inject-arg: Inject a dynamic argument (name:type:desc:required)
+  --help: Show this message and exit
+
+EXAMPLES:
+  hush logz: Show help for logz utility
+  hush --no-color git: Show help without colors
+  hush --file ./alt.txt mycli: Load help from custom file
+  hush --inject-flag verbose:Enable verbose output mycli: Inject custom flag
+  hush --inject-arg id:int:User ID:true mycli: Inject dynamic argument
+
+EXIT_CODES:
+  0: Success
+  1: Usage error
+  2: Help file not found
+
+NOTES:
+  Supports dynamic flag/arg injection via --inject-*
+  Help files can be located in cwd or system paths
+  Use `--file` to specify an alternate help file

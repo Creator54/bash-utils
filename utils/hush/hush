@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+# Hush - Beautiful help system for shell utilities
+set -euo pipefail
+
+# Colors
+declare -r RED='\033[38;5;196m' GREEN='\033[38;5;46m' YELLOW='\033[38;5;226m'
+declare -r CYAN='\033[38;5;51m' MAGENTA='\033[38;5;201m' ORANGE='\033[38;5;208m'
+declare -r WHITE='\033[38;5;255m' GRAY='\033[38;5;246m' DARK_GRAY='\033[38;5;240m'
+declare -r BOLD='\033[1m' RESET='\033[0m'
+
+# Globals
+declare -g USE_COLOR=true SCRIPT_NAME="" SUBCOMMAND="" BOX_WIDTH=70 CUSTOM_HELP_FILE=""
+declare -ga DYNAMIC_FLAGS=() DYNAMIC_ARGS=()
+
+# Parse arguments
+parse_args() {
+    local flag_found=false
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-color | -n) USE_COLOR=false; flag_found=true ;;
+            --help | -h) SCRIPT_NAME="hush"; flag_found=true ;;
+            --inject-flag | -i) DYNAMIC_FLAGS+=("$2"); shift; flag_found=true ;;
+            --inject-arg | -a) DYNAMIC_ARGS+=("$2"); shift; flag_found=true ;;
+            --parent-script | -p) shift; flag_found=true ;; # Skip parent script path
+            --file | -f) CUSTOM_HELP_FILE="$2"; shift; flag_found=true ;; # <-- NEW flag
+            --width) BOX_WIDTH="$2"; shift; flag_found=true ;;
+            *) [[ -z "$SCRIPT_NAME" ]] && SCRIPT_NAME="$1" || SUBCOMMAND="$1" ;;
+        esac
+        shift
+    done
+
+    # If no flags were passed and a script name was provided, use the default path
+    if [[ "$flag_found" == "false" && -n "$SCRIPT_NAME" ]]; then
+        local default_help_file="$HOME/.local/share/$SCRIPT_NAME/hush.txt"
+        if [[ -f "$default_help_file" ]]; then
+            CUSTOM_HELP_FILE="$default_help_file";
+        else
+            echo "Error: No help file found for '$SCRIPT_NAME'" >&2
+            echo "Expected file: $default_help_file" >&2
+            exit 1
+        fi
+    fi    
+}
+
+# Find help file
+find_help_file() {
+    local name="$1"
+    local paths=(
+        "$name.txt" "hush.txt" "examples/$name.txt" 
+        "$(dirname "${BASH_SOURCE[0]}")/$name.txt"
+        "$(dirname "${BASH_SOURCE[0]}")/hush.txt"
+        "$HOME/.local/share/hush/$name.txt"
+        "/usr/local/share/hush/$name.txt"
+    )
+    for path in "${paths[@]}"; do
+        [[ -f "$path" ]] && { echo "$path"; return 0; }
+    done
+    return 1
+}
+
+# Create box
+create_box() {
+    local title="$1" content="$2" width=${BOX_WIDTH:-70}
+    echo
+    local dashes=$(printf '─%.0s' $(seq 1 $((width - ${#title} - 3))))
+    echo -e "${DARK_GRAY}┌─ ${WHITE}${BOLD}${title}${RESET}${DARK_GRAY} ${dashes}┐${RESET}"
+    
+    while IFS= read -r line; do
+        local display_text=$(echo -e "$line" | sed 's/\x1b\[[0-9;]*[mK]//g')
+        local padding=$((width - ${#display_text} - 1))
+        [[ $padding -lt 0 ]] && padding=0
+        echo -e "${DARK_GRAY}│${RESET} ${line}$(printf "%*s" $padding)${DARK_GRAY}│${RESET}"
+    done <<< "$content"
+    
+    echo -e "${DARK_GRAY}└$(printf '─%.0s' $(seq 1 $width))┘${RESET}"
+}
+
+# Add dynamic content to sections
+inject_dynamic_content() {
+    local section="$1" content="$2"
+    case "$section" in
+        ARGUMENTS)
+            for arg in "${DYNAMIC_ARGS[@]}"; do
+                [[ "$arg" =~ ^([^:]+):([^:]+):([^:]+):([^:]+)$ ]] || continue
+                local name="${BASH_REMATCH[1]}" type="${BASH_REMATCH[2]}" 
+                local desc="${BASH_REMATCH[3]}" req="${BASH_REMATCH[4]}"
+                [[ "$req" == "true" ]] && content+=$'\n'"* $name: $type [required]"$'\n'"    $desc" \
+                    || content+=$'\n'"$name: $type [optional]"$'\n'"    $desc"
+            done ;;
+        OPTIONS)
+            for flag in "${DYNAMIC_FLAGS[@]}"; do
+                [[ "$flag" =~ ^([^:]+):(.+)$ ]] && content+=$'\n'"--${BASH_REMATCH[1]}: ${BASH_REMATCH[2]}"
+            done ;;
+    esac
+    echo "$content"
+}
+
+# Format sections
+format_section() {
+    local section="$1" content="$2"
+    content=$(inject_dynamic_content "$section" "$content")
+    
+    case "$section" in
+        USAGE)
+            local formatted_content=""
+            local words=($content)
+            for word in "${words[@]}"; do
+                if [[ "$word" =~ ^\[([^]]+)\]$ ]]; then
+                    formatted_content+="${GREEN}[${BASH_REMATCH[1]}]${RESET} "
+                elif [[ "$word" =~ ^[A-Z_]+$ ]]; then
+                    formatted_content+="${CYAN}${BOLD}${word}${RESET} "
+                else
+                    formatted_content+="${word} "
+                fi
+            done
+            echo -e "${YELLOW}${BOLD}Usage:${RESET} ${WHITE}${formatted_content% }${RESET}"
+            ;;
+        DESCRIPTION)
+            echo -e "${GRAY}$content${RESET}"
+            ;;
+        ARGUMENTS)
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^\*[[:space:]]*([^:]+):[[:space:]]*(.+) ]]; then
+                    echo -e "${RED}${BOLD}*${RESET}   ${CYAN}${BASH_REMATCH[1]}${RESET}    ${ORANGE}${BASH_REMATCH[2]}${RESET}"
+                elif [[ "$line" =~ ^[[:space:]]*([^:]+):[[:space:]]*(.+) ]]; then
+                    echo -e "    ${CYAN}${BASH_REMATCH[1]}${RESET}    ${ORANGE}${BASH_REMATCH[2]}${RESET}"
+                elif [[ "$line" =~ ^[[:space:]]+(.+) ]]; then
+                    echo -e "        ${GRAY}${BASH_REMATCH[1]}${RESET}"
+                fi
+            done <<< "$content"
+            ;;
+        OPTIONS)
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^--?([^:]+):[[:space:]]*(.*)$ ]]; then
+                    echo -e "${GREEN}${BOLD}--${BASH_REMATCH[1]}${RESET}: ${GRAY}${BASH_REMATCH[2]}${RESET}"
+                elif [[ "$line" =~ ^([^:]+):[[:space:]]*(.+) ]]; then
+                    echo -e "${GREEN}${BOLD}${BASH_REMATCH[1]}${RESET}: ${GRAY}${BASH_REMATCH[2]}${RESET}"
+                fi
+            done <<< "$content"
+            ;;
+        SUBCOMMANDS)
+            while IFS= read -r line; do
+                [[ "$line" =~ ^([^:]+):[[:space:]]*(.+) ]] && \
+                    echo -e "${MAGENTA}${BOLD}${BASH_REMATCH[1]}${RESET}    ${GRAY}${BASH_REMATCH[2]}${RESET}"
+            done <<< "$content"
+            ;;
+        EXAMPLES)
+            while IFS= read -r line; do
+                [[ "$line" =~ ^([^:]+):[[:space:]]*(.+) ]] && \
+                    echo -e "${DARK_GRAY}$ ${RESET}${WHITE}${BOLD}${BASH_REMATCH[1]}${RESET}  ${DARK_GRAY}# ${BASH_REMATCH[2]}${RESET}"
+            done <<< "$content"
+            ;;
+        EXIT_CODES|NOTES)
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^([0-9]+):[[:space:]]*(.+) ]]; then
+                    echo -e "${CYAN}${BASH_REMATCH[1]}${RESET}: ${GRAY}${BASH_REMATCH[2]}${RESET}"
+                else
+                    echo -e "${GRAY}$line${RESET}"
+                fi
+            done <<< "$content"
+            ;;
+        *)
+            echo -e "${GRAY}$content${RESET}"
+            ;;
+    esac
+}
+
+# Parse help file
+parse_help_file() {
+    local file="$1" target_sub="$2" current_section="" in_target=true
+    [[ -n "$target_sub" ]] && in_target=false
+    
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ -n "$target_sub" && "$line" =~ ^SUBCOMMAND:[[:space:]]*(.+)$ ]]; then
+            [[ "${BASH_REMATCH[1]}" == "$target_sub" ]] && in_target=true || in_target=false
+            continue
+        fi
+        [[ "$in_target" == "false" ]] && continue
+        if [[ "$line" =~ ^(USAGE|DESCRIPTION|ARGUMENTS|OPTIONS|SUBCOMMANDS|EXAMPLES|NOTES|EXIT_CODES):[[:space:]]*(.*)$ ]]; then
+            [[ -n "$current_section" ]] && echo "END_SECTION"
+            current_section="${BASH_REMATCH[1]}"
+            echo "SECTION:$current_section"
+            [[ -n "${BASH_REMATCH[2]}" ]] && echo "${BASH_REMATCH[2]}"
+        elif [[ -n "$current_section" && -n "$line" ]]; then
+            echo "$line"
+        fi
+    done < "$file"
+    [[ -n "$current_section" ]] && echo "END_SECTION"
+}
+
+# Show help
+show_help() {
+    local help_file="$1" target_sub="$2"
+    declare -A sections
+    local current_section="" section_content="" collecting=false is_first=true
+    local section_order=()
+    
+    while IFS= read -r line; do
+        if [[ "$line" == "SECTION:"* ]]; then
+            if [[ -n "$current_section" && -n "$section_content" ]]; then
+                sections["$current_section"]="$section_content"
+                section_order+=("$current_section")
+            fi
+            current_section="${line#SECTION:}"
+            section_content=""
+            collecting=true
+            is_first=true
+        elif [[ "$line" == "END_SECTION" ]]; then
+            collecting=false
+        elif [[ "$collecting" == "true" ]]; then
+            if [[ "$is_first" == "true" ]]; then
+                section_content="$line"
+                is_first=false
+            else
+                section_content+=$'\n'"$line"
+            fi
+        fi
+    done < <(parse_help_file "$help_file" "$target_sub")
+    
+    if [[ -n "$current_section" && -n "$section_content" ]]; then
+        sections["$current_section"]="$section_content"
+        section_order+=("$current_section")
+    fi
+    
+    local max_width=50
+    for section in "${section_order[@]}"; do
+        local formatted=$(format_section "$section" "${sections[$section]}")
+        while IFS= read -r content_line; do
+            local display_text=$(echo -e "$content_line" | sed 's/\x1b\[[0-9;]*[mK]//g')
+            [[ ${#display_text} -gt $max_width ]] && max_width=${#display_text}
+        done <<< "$formatted"
+    done
+    
+    BOX_WIDTH=$((max_width + 4))
+    
+    for section in "${section_order[@]}"; do
+        case "$section" in
+            USAGE) 
+                echo
+                format_section "$section" "${sections[$section]}"
+                echo
+                ;;
+            DESCRIPTION) 
+                format_section "$section" "${sections[$section]}"
+                ;;
+            *) 
+                create_box "$section" "$(format_section "$section" "${sections[$section]}")"
+                ;;
+        esac
+    done
+    echo
+}
+
+# Main
+main() {
+    parse_args "$@"
+    
+    # Handle case where no utility was specified
+    if [[ -z "$SCRIPT_NAME" ]]; then
+        echo "Usage: hush UTILITY [OPTIONS]" >&2
+        echo "Try: hush hush" >&2
+        exit 1
+    fi
+
+    local help_file
+
+    if [[ -n "$CUSTOM_HELP_FILE" && -f "$CUSTOM_HELP_FILE" ]]; then
+        help_file="$CUSTOM_HELP_FILE"
+    elif ! help_file=$(find_help_file "$SCRIPT_NAME"); then
+        echo "Error: No help file found for '$SCRIPT_NAME'" >&2
+        exit 1
+    fi
+    
+    show_help "$help_file" "$SUBCOMMAND"
+}
+
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"

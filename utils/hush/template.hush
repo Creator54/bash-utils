@@ -1,0 +1,44 @@
+USAGE: hush [OPTIONS] UTILITY [ARGS...]
+
+DESCRIPTION:
+Minimal and elegant help viewer for POSIX shell utilities.
+
+ARGUMENTS:
+* UTILITY: TEXT [required]
+    Name of the utility to show help for
+ARGS: TEXT...
+    Optional arguments or subcommands to pass through
+
+OPTIONS:
+--no-color
+    Disable color output
+--file: PATH
+    Use a custom help file instead of the default
+--inject-flag: TEXT
+    Inject a dynamic flag (--name:description)
+--inject-arg: TEXT
+    Inject a dynamic argument (name:type:desc:required)
+--help
+    Show this message and exit
+
+EXAMPLES:
+hush logz: Show help for logz utility
+    Displays help for the 'logz' utility using default config
+hush --no-color git: Show help without colors
+    Disables ANSI color formatting
+hush --file ./myhelp.txt mycli: Use custom file
+    Loads help content from the given file path
+hush --inject-flag verbose:Enable verbose output mycli
+    Injects a flag named --verbose with description
+hush --inject-arg id:int:User ID:true mycli
+    Injects required integer argument 'id' with description
+
+EXIT_CODES:
+0: Success
+1: Usage error
+2: Help file not found
+
+NOTES:
+Supports hush.txt in cwd or system path
+Use --inject-* to simulate CLI-like docs dynamically
+Color output can be disabled with --no-color
