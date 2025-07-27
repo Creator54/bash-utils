@@ -10,6 +10,7 @@ LOG_TIMESTAMP=1
 LOG_COLOR=1  # Enable by default
 FILTER_LEVEL=""  # Separate filtering level
 DEBUG=0
+LOG_CUSTOM_FORMAT=""  # Custom format template
 
 # Initialize log level from environment variables
 init_log_level() {
@@ -52,6 +53,11 @@ while [ $# -gt 0 ]; do
             LOG_FILE="$2"
             shift 2
             ;;
+        -F|--custom-format)
+            LOG_CUSTOM_FORMAT="$2"
+            LOG_FORMAT="custom"
+            shift 2
+            ;;
         -t|--timestamp)
             LOG_TIMESTAMP=1
             shift
@@ -92,9 +98,14 @@ esac
 
 # Validate format
 case "$LOG_FORMAT" in
-    text|json|syslog) ;;
+    text|json|syslog|custom) ;;
     *) error_exit "Invalid format: $LOG_FORMAT" 1 ;;
 esac
+
+# Custom format validation
+if [ "$LOG_FORMAT" = "custom" ] && [ -z "$LOG_CUSTOM_FORMAT" ]; then
+    error_exit "Custom format requires -F/--custom-format template" 1
+fi
 
 # Get message
 [ $# -eq 0 ] && error_exit "No message provided" 1
@@ -147,7 +158,26 @@ format_message() {
                 ERROR) syslog_level=3;; 
                 FATAL) syslog_level=2;; 
             esac
-            echo "<$syslog_level>$(date '+%b %d %H:%M:%S') $(hostname 2>/dev/null || echo 'localhost')[$$]: $msg"
+            echo "<$syslog_level>$(date '+%b %d %H:%M:%S') $(hostname 2>/dev/null || echo 'localhost')[$]: $msg"
+            ;;
+        custom)
+            local output="$LOG_CUSTOM_FORMAT"
+
+            # Replace placeholders
+            output="${output//\{timestamp\}/$(get_timestamp)}"
+            output="${output//\{level\}/$level}"
+            output="${output//\{message\}/$msg}"
+            output="${output//\{pid\}/$}"
+            output="${output//\{hostname\}/$(hostname 2>/dev/null || echo 'localhost')}"
+
+            # Add colors if enabled
+            if [ $LOG_COLOR -eq 1 ]; then
+                local color
+                color=$(get_color "$level")
+                echo -e "\033[${color}m${output}\033[0m"
+            else
+                echo "$output"
+            fi
             ;;
     esac
 }
